@@ -1,0 +1,55 @@
+%% {
+  def initialize(str, debug=false)
+    setup_parser(str, debug)
+    @tabs = 0
+    @space = "  "
+    @processed = ""
+  end
+
+  attr_accessor :tabs, :space
+  attr_accessor :processed
+
+}
+
+              space = " "
+                tab = "\t"
+                  - = (space | tab)*
+                eol = "\n"
+                eof = !.
+          l_bracket = < "{" > { text }
+          r_bracket = < "}" > { text }
+    everything_else = < (!(eol | do_block | "{" | "[") .)* > { text }
+       single_quote = < "'" single_quote_string "'" > { text }
+       double_quote = < "\"" double_quote_string* "'" > { text }
+      interop_start = "#{"
+        interop_end = "}"
+single_quote_string = /[^']+/
+double_quote_string = interop_start:s interop_body:b interop_end:e
+                    | "\\\""
+                    | /[^"]+/
+       interop_body = single_quote
+                    | double_quote
+                    | /[^}]+/
+             indent = < ("module" | "class" | "if" | "until" | "for" | "unless" | "while" | "begin" | "case" | "then" | "rescue" | "def" | "do") > { text }
+               both = < ("rescue" | "ensure" | "elsif" | "else" | "when") > { text }
+            outdent = < "end" > { text }
+           do_block = < /do\s*\|[^|]+\|/ > { text }
+      bracket_block = < /\{\s*\|[^|]+\|/ > { text }
+              block = do_block
+                    | bracket_block
+        bracket_end = < /[^\[]*\]/ > { text }
+          brace_end = < /^[^\{]*\}/ > { text }
+               line = indent:i everything_else:c { code = ""; @tabs.times {|i| code << @space}; @tabs += 1; code << "#{i}#{c}" }
+                    | outdent:o everything_else:c { @tabs -= 1; code = ""; @tabs.times {|i| code << @space}; code << "#{o}#{c}" }
+                    | both:b everything_else:c { code = ""; (@tabs-1).times {|i| code << @space}; code << "#{b}#{c}" }
+                    | "[" brace_end:e { code = ""; @tabs.times {|i| code << @space}; code << "[#{e}" }
+                    | "[" everything_else:c { code = ""; @tabs.times {|i| code << @space}; @tabs += 1; code << "[#{c}" }
+                    | "]" everything_else:c { @tabs -= 1;code = ""; @tabs.times {|i| code << @space}; code << "]#{c}" }
+                    | l_bracket:b bracket_end:e { code = ""; @tabs.times {|i| code << @space}; code << "#{b}#{e}" }
+                    | l_bracket:b everything_else:c { code = ""; @tabs.times {|i| code << @space}; @tabs += 1; code << "#{b}#{c}" }
+                    | r_bracket:b everything_else:c { @tabs -= 1; code = ""; @tabs.times {|i| code << @space}; code << "#{b}#{c}" }
+                    | everything_else:c block:d { code = ""; @tabs.times {|i| code << @space}; @tabs += 1; code << "#{c}#{d}" }
+                    | everything_else:c { code = ""; @tabs.times {|i| code << @space}; code << "#{c}" }
+               code = - line:l eol code:c { "#{l}\n#{c}" }
+                    | - line:l eol { "#{l}\n" }
+               root = code:c eof { @processed = c }
