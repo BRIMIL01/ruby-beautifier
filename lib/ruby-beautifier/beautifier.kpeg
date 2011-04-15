@@ -1,9 +1,12 @@
+%% name = RubyBeautifier
+
 %% {
   def initialize(str, debug=false)
     setup_parser(str, debug)
     @tabs = 0
     @space = "  "
     @processed = ""
+    @str_token = ""
   end
 
   attr_accessor :tabs, :space
@@ -18,38 +21,51 @@
                 eof = !.
           l_bracket = < "{" > { text }
           r_bracket = < "}" > { text }
-    everything_else = < (!(eol | do_block | "{" | "[") .)* > { text }
+    everything_else = < (!(eol | do_block | bracket_block | "{" | "[") .)* > { text }
+
        single_quote = < "'" single_quote_string "'" > { text }
        double_quote = < "\"" double_quote_string* "'" > { text }
       interop_start = "#{"
         interop_end = "}"
 single_quote_string = /[^']+/
-double_quote_string = interop_start:s interop_body:b interop_end:e
+double_quote_string = interop_start interop_body* interop_end
                     | "\\\""
                     | /[^"]+/
        interop_body = single_quote
                     | double_quote
+                    | "\\}"
                     | /[^}]+/
+
              indent = < ("module" | "class" | "if" | "until" | "for" | "unless" | "while" | "begin" | "case" | "then" | "rescue" | "def" | "do") > { text }
                both = < ("rescue" | "ensure" | "elsif" | "else" | "when") > { text }
             outdent = < "end" > { text }
            do_block = < /do\s*\|[^|]+\|/ > { text }
       bracket_block = < /\{\s*\|[^|]+\|/ > { text }
-              block = do_block
-                    | bracket_block
         bracket_end = < /[^\[]*\]/ > { text }
           brace_end = < /^[^\{]*\}/ > { text }
-               line = indent:i everything_else:c { code = ""; @tabs.times {|i| code << @space}; @tabs += 1; code << "#{i}#{c}" }
-                    | outdent:o everything_else:c { @tabs -= 1; code = ""; @tabs.times {|i| code << @space}; code << "#{o}#{c}" }
-                    | both:b everything_else:c { code = ""; (@tabs-1).times {|i| code << @space}; code << "#{b}#{c}" }
-                    | "[" brace_end:e { code = ""; @tabs.times {|i| code << @space}; code << "[#{e}" }
-                    | "[" everything_else:c { code = ""; @tabs.times {|i| code << @space}; @tabs += 1; code << "[#{c}" }
-                    | "]" everything_else:c { @tabs -= 1;code = ""; @tabs.times {|i| code << @space}; code << "]#{c}" }
-                    | l_bracket:b bracket_end:e { code = ""; @tabs.times {|i| code << @space}; code << "#{b}#{e}" }
-                    | l_bracket:b everything_else:c { code = ""; @tabs.times {|i| code << @space}; @tabs += 1; code << "#{b}#{c}" }
-                    | r_bracket:b everything_else:c { @tabs -= 1; code = ""; @tabs.times {|i| code << @space}; code << "#{b}#{c}" }
-                    | everything_else:c block:d { code = ""; @tabs.times {|i| code << @space}; @tabs += 1; code << "#{c}#{d}" }
-                    | everything_else:c { code = ""; @tabs.times {|i| code << @space}; code << "#{c}" }
-               code = - line:l eol code:c { "#{l}\n#{c}" }
-                    | - line:l eol { "#{l}\n" }
+              block = do_block
+                    | bracket_block
+
+    str_block_match = < /[A-Z]+/ > &{ @str_token == text }
+   text_block_start = < /<<-?/ > { text }
+     pre_text_block = < (!(text_block_start | eol) .)* > { text }
+   text_block_label = < /[A-Z]+/ > { @str_token = text; text }
+     multiline_text = pre_text_block:p text_block_start:s text_block_label:l - eol text_block:b { "#{p}#{s}#{l}\n#{b}" }
+   text_block_lines = < (!str_block_match .)* > { text }
+         text_block = text_block_lines:b str_block_match:m { "#{b}#{@space * @tabs}#{@str_token}" }
+
+               line = < indent (space everything_else)? eol > { code = "#{@space * @tabs}#{text}"; @tabs += 1; code  }
+                    | < outdent (space everything_else)? eol > { @tabs -= 1; "#{@space * @tabs}#{text}" }
+                    | < both (space everything_else)? eol > { both_tabs = @tabs - 1; "#{@space * both_tabs}#{text}" }
+                    | < "[" brace_end eol > { "#{@space * @tabs}#{text}" }
+                    | < "[" everything_else eol > { @tabs += 1; "#{@space * (@tabs-1)}#{text}" }
+                    | < "]" everything_else eol > { @tabs -= 1; "#{@space * @tabs}#{text}" }
+                    | < l_bracket bracket_end eol > { "#{@space * @tabs}#{text}" }
+                    | < l_bracket everything_else eol > { @tabs += 1; "#{@space * (@tabs-1)}#{text}" }
+                    | < r_bracket everything_else eol > { @tabs -= 1; "#{@space * @tabs}#{text}" }
+                    | < everything_else block eol > { @tabs += 1; "#{@space * (@tabs-1)}#{text}" }
+                    |   multiline_text:e - eol { "#{@space * @tabs}#{e}\n" }
+                    | < everything_else eol > { "#{@space * @tabs}#{text}" }
+               code = - line:l code:c { "#{l}#{c}" }
+                    | - line:l { "#{l}" }
                root = code:c eof { @processed = c }
